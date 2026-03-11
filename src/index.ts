@@ -96,23 +96,20 @@ async function checkGymAvailability() {
         await page.click('button:has-text("選択した施設で検索")');
 
         await page.evaluate(() => {
-          (document.querySelector('input#dispDayKbn_2') as HTMLElement)?.click();
+          const radio31 = document.querySelector('input#dispDayKbn_2') as HTMLElement;
+          if (radio31) radio31.click();
         });
         await page.click('button:has-text("選択した条件で表示")');
         await page.waitForLoadState('networkidle');
 
         let combinedSlots = await scrapeCalendar(page);
         
-        const nextButton = page.locator('button:has-text("次の31日分")');
-        try {
-          if (await nextButton.isVisible({ timeout: 5000 })) {
-            await nextButton.click();
-            await page.waitForLoadState('networkidle');
-            const secondMonthSlots = await scrapeCalendar(page);
-            combinedSlots = [...combinedSlots, ...secondMonthSlots];
-          }
-        } catch (e) {
-          // Ignore
+        const nextButton = page.locator('a:has-text("次の31日分"), button:has-text("次の31日分")');
+        if (await nextButton.isVisible({ timeout: 3000 })) {
+          await nextButton.click();
+          await page.waitForLoadState('networkidle');
+          const secondMonthSlots = await scrapeCalendar(page);
+          combinedSlots = [...combinedSlots, ...secondMonthSlots];
         }
 
         const gymResults = processResults(gym.name, combinedSlots);
@@ -139,36 +136,43 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
     const table = document.querySelector('table');
     if (!table) return results;
 
-    // ヘッダー（日付）の特定を強化
-    const allHeaders = Array.from(table.querySelectorAll('th'));
-    const dateHeaders = allHeaders.filter(h => h.innerText.includes('月') && h.innerText.includes('日'));
+    // 1. 日付リストの作成 (thから抽出)
+    const allThs = Array.from(table.querySelectorAll('th'));
+    const dateList: { month: number, day: number }[] = [];
     
-    const dateList = dateHeaders.map(h => {
-      const text = h.innerText.replace(/\s+/g, '');
+    allThs.forEach(th => {
+      const text = th.innerText.replace(/\s+/g, '');
       const match = text.match(/(\d+)月(\d+)日/);
-      return match ? { month: parseInt(match[1]), day: parseInt(match[2]) } : null;
+      if (match) {
+        dateList.push({ month: parseInt(match[1]), day: parseInt(match[2]) });
+      }
     });
 
     if (dateList.length === 0) return results;
 
+    // 2. 各時間帯の行を処理
+    // th[scope="row"] を持つ行が時間帯行
     const rows = Array.from(table.querySelectorAll('tr')).filter(r => r.querySelector('th[scope="row"]'));
+    
     rows.forEach(row => {
-      const timeRange = (row.querySelector('th') as HTMLElement).innerText.trim();
-      const cells = Array.from(row.querySelectorAll('td'));
+      const timeRangeTh = row.querySelector('th[scope="row"]') as HTMLElement;
+      const timeRange = timeRangeTh.innerText.trim();
       
-      cells.forEach((cell, index) => {
-        const dateInfo = dateList[index];
-        if (!dateInfo) return;
+      const tds = Array.from(row.querySelectorAll('td'));
+      tds.forEach((td, index) => {
+        if (index >= dateList.length) return;
         
-        const img = cell.querySelector('img');
+        const img = td.querySelector('img');
         const alt = img?.getAttribute('alt') || '';
+        const src = img?.getAttribute('src') || '';
         
-        // 「空いています」の判定をより確実に
-        if (alt.indexOf('空いています') !== -1 || alt.indexOf('空き') !== -1) {
+        // 空き判定: alt または src で判定
+        if (alt.includes('空いています') || src.includes('icn_scche_ok')) {
+          const dateInfo = dateList[index];
           results.push({
             date: `${dateInfo.month}/${dateInfo.day}`,
             time: timeRange,
-            status: cell.innerText.trim() || '○'
+            status: td.innerText.trim() || '○'
           });
         }
       });
@@ -184,7 +188,7 @@ function processResults(gymName: string, availability: { date: string, time: str
 
   const filtered = availability.filter(a => {
     const [month, day] = a.date.split('/').map(Number);
-    const targetYear = (month < currentMonth - 2) ? year + 1 : year; // 念のため2ヶ月前の余裕を持たせる
+    const targetYear = (month < currentMonth - 2) ? year + 1 : year;
     const date = new Date(targetYear, month - 1, day);
     const dateStr = format(date, 'yyyy-MM-dd');
 
