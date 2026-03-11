@@ -43,7 +43,13 @@ const TARGET_DATE_CONFIGS: TargetDateConfig[] = (process.env.TARGET_DATES || '')
 const BASE_URL = 'https://yoyaku-nishi.growone.net/sportsnet/Welcome.cgi';
 
 async function sendEmail(message: string) {
+  // デバッグ用：どの変数が足りないかを出力
   if (!EMAIL_USER || !EMAIL_PASS || !EMAIL_TO) {
+    console.log('--- Email Config Debug ---');
+    console.log(`EMAIL_USER: ${EMAIL_USER ? 'SET' : 'MISSING'}`);
+    console.log(`EMAIL_PASS: ${EMAIL_PASS ? 'SET' : 'MISSING'}`);
+    console.log(`EMAIL_TO: ${EMAIL_TO ? 'SET' : 'MISSING'}`);
+    console.log('--------------------------');
     console.log('Email configuration is not set. Outputting to console instead:');
     console.log(message);
     return;
@@ -106,7 +112,6 @@ async function checkGymAvailability() {
         await page.click('button:has-text("施設で検索")');
         await page.waitForLoadState('networkidle');
 
-        // 「次の7日分」を計8回（56日分）クリックして全期間を巡回する
         let allExtractedSlots: any[] = [];
         for (let i = 0; i < 8; i++) {
           const slots = await scrapeCalendar(page);
@@ -148,15 +153,13 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
     const rows = Array.from(table.querySelectorAll('tr'));
     if (rows.length === 0) return results;
 
-    // 1行目から日付を取得
-    const headerThs = Array.from(rows[0].querySelectorAll('th')).slice(1); // 最初の空thを除く
+    const headerThs = Array.from(rows[0].querySelectorAll('th')).slice(1);
     const dateList = headerThs.map(th => {
       const text = th.innerText.replace(/\s+/g, '');
       const match = text.match(/(\d+)月(\d+)日/);
       return match ? { month: parseInt(match[1]), day: parseInt(match[2]) } : null;
     });
 
-    // 2行目以降（時間帯行）を処理
     rows.slice(1).forEach(row => {
       const timeTh = row.querySelector('th');
       if (!timeTh) return;
@@ -189,7 +192,6 @@ function processResults(gymName: string, availability: { date: string, time: str
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
 
-  // 重複を削除（scrapeCalendarを複数回呼ぶため）
   const uniqueSlots = availability.filter((v, i, a) => 
     a.findIndex(t => t.date === v.date && t.time === v.time) === i
   );
@@ -212,9 +214,7 @@ function processResults(gymName: string, availability: { date: string, time: str
         return startHour >= 8 && startHour < 18;
       }
     } else {
-      // 特定の日付指定があるが、この日が含まれていない場合は除外
       if (TARGET_DATE_CONFIGS.some(c => c.date === dateStr)) {
-         // ここは上記の specificConfig で処理済み
       } else {
         return false;
       }
