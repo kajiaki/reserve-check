@@ -101,10 +101,8 @@ async function checkGymAvailability() {
         await page.click('button:has-text("選択した条件で表示")');
         await page.waitForLoadState('networkidle');
 
-        // 1ヶ月目（本日〜31日分）をチェック
         let combinedSlots = await scrapeCalendar(page);
         
-        // 「次の31日分」ボタンがあるか確認してクリック（最大5秒待機）
         const nextButton = page.locator('button:has-text("次の31日分")');
         try {
           if (await nextButton.isVisible({ timeout: 5000 })) {
@@ -114,7 +112,7 @@ async function checkGymAvailability() {
             combinedSlots = [...combinedSlots, ...secondMonthSlots];
           }
         } catch (e) {
-          console.log(`  Next month button not found or not clickable for ${gym.name}. Skipping.`);
+          // Ignore
         }
 
         const gymResults = processResults(gym.name, combinedSlots);
@@ -128,7 +126,7 @@ async function checkGymAvailability() {
   await browser.close();
 
   if (allResults.length > 0) {
-    const message = '西宮市の体育館に空きが見見つかりました。\n\n' + allResults.join('\n\n');
+    const message = '西宮市の体育館に空きが見つかりました。\n\n' + allResults.join('\n\n');
     await sendEmail(message);
   } else {
     console.log('No available slots found.');
@@ -141,23 +139,32 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
     const table = document.querySelector('table');
     if (!table) return results;
 
-    const headers = Array.from(table.querySelectorAll('th')).filter(h => h.innerText.includes('月'));
-    const dateList = headers.map(h => {
+    // ヘッダー（日付）の特定を強化
+    const allHeaders = Array.from(table.querySelectorAll('th'));
+    const dateHeaders = allHeaders.filter(h => h.innerText.includes('月') && h.innerText.includes('日'));
+    
+    const dateList = dateHeaders.map(h => {
       const text = h.innerText.replace(/\s+/g, '');
       const match = text.match(/(\d+)月(\d+)日/);
       return match ? { month: parseInt(match[1]), day: parseInt(match[2]) } : null;
     });
 
+    if (dateList.length === 0) return results;
+
     const rows = Array.from(table.querySelectorAll('tr')).filter(r => r.querySelector('th[scope="row"]'));
     rows.forEach(row => {
       const timeRange = (row.querySelector('th') as HTMLElement).innerText.trim();
       const cells = Array.from(row.querySelectorAll('td'));
+      
       cells.forEach((cell, index) => {
         const dateInfo = dateList[index];
         if (!dateInfo) return;
+        
         const img = cell.querySelector('img');
         const alt = img?.getAttribute('alt') || '';
-        if (alt.includes('空いています')) {
+        
+        // 「空いています」の判定をより確実に
+        if (alt.indexOf('空いています') !== -1 || alt.indexOf('空き') !== -1) {
           results.push({
             date: `${dateInfo.month}/${dateInfo.day}`,
             time: timeRange,
@@ -177,7 +184,7 @@ function processResults(gymName: string, availability: { date: string, time: str
 
   const filtered = availability.filter(a => {
     const [month, day] = a.date.split('/').map(Number);
-    const targetYear = (month < currentMonth) ? year + 1 : year;
+    const targetYear = (month < currentMonth - 2) ? year + 1 : year; // 念のため2ヶ月前の余裕を持たせる
     const date = new Date(targetYear, month - 1, day);
     const dateStr = format(date, 'yyyy-MM-dd');
 
