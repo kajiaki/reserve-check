@@ -78,12 +78,22 @@ async function checkGymAvailability() {
       await page.goto(BASE_URL);
       await page.click('text=ログインせずに空き状況を検索');
       
+      // 1. 大分類「体育室」を選択
+      // 2. 小分類「バスケットボール」を選択
+      // 3. 対象の「体育館」を選択
       await page.evaluate((gymId) => {
-        (document.querySelector('input#catSel1_1') as HTMLElement)?.click();
-        (document.querySelector(`input#${gymId}`) as HTMLElement)?.click();
+        (document.querySelector('input#catSel1_1') as HTMLElement)?.click(); // 体育室
+        setTimeout(() => {
+          (document.querySelector('input#genSel1_5') as HTMLElement)?.click(); // バスケットボール
+          (document.querySelector(`input#${gymId}`) as HTMLElement)?.click(); // 体育館
+        }, 500);
       }, gym.id);
+      
+      // 非同期での表示切り替えを待つための待機
+      await page.waitForTimeout(1000);
       await page.click('button:has-text("選択した条件で次へ")');
 
+      // 4. 「体育室半面」を選択
       const foundHalf = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('tr'));
         const halfRow = rows.find(r => r.innerText.includes('体育室半面'));
@@ -123,7 +133,7 @@ async function checkGymAvailability() {
   await browser.close();
 
   if (allResults.length > 0) {
-    const message = '西宮市の体育館に空きが見つかりました。\n\n' + allResults.join('\n\n');
+    const message = '西宮市の体育館（バスケットボール・半面）に空きが見つかりました。\n\n' + allResults.join('\n\n');
     await sendEmail(message);
   } else {
     console.log('No available slots found.');
@@ -136,7 +146,6 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
     const table = document.querySelector('table');
     if (!table) return results;
 
-    // 1. 日付リストの作成 (thから抽出)
     const allThs = Array.from(table.querySelectorAll('th'));
     const dateList: { month: number, day: number }[] = [];
     
@@ -150,8 +159,6 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
 
     if (dateList.length === 0) return results;
 
-    // 2. 各時間帯の行を処理
-    // th[scope="row"] を持つ行が時間帯行
     const rows = Array.from(table.querySelectorAll('tr')).filter(r => r.querySelector('th[scope="row"]'));
     
     rows.forEach(row => {
@@ -166,7 +173,6 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
         const alt = img?.getAttribute('alt') || '';
         const src = img?.getAttribute('src') || '';
         
-        // 空き判定: alt または src で判定
         if (alt.includes('空いています') || src.includes('icn_scche_ok')) {
           const dateInfo = dateList[index];
           results.push({
