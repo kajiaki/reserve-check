@@ -9,6 +9,7 @@ const TARGET_GYMS = [
   { id: 'catSel3_5', name: '甲武体育館' },
   { id: 'catSel3_6', name: '北夙川体育館' },
   { id: 'catSel3_10', name: '流通東体育館' },
+  { id: 'catSel3_16', name: '浜甲子園体育館' },
   { id: 'catSel3_17', name: '松原体育館' },
 ];
 
@@ -43,13 +44,7 @@ const TARGET_DATE_CONFIGS: TargetDateConfig[] = (process.env.TARGET_DATES || '')
 const BASE_URL = 'https://yoyaku-nishi.growone.net/sportsnet/Welcome.cgi';
 
 async function sendEmail(message: string) {
-  // デバッグ用：どの変数が足りないかを出力
   if (!EMAIL_USER || !EMAIL_PASS || !EMAIL_TO) {
-    console.log('--- Email Config Debug ---');
-    console.log(`EMAIL_USER: ${EMAIL_USER ? 'SET' : 'MISSING'}`);
-    console.log(`EMAIL_PASS: ${EMAIL_PASS ? 'SET' : 'MISSING'}`);
-    console.log(`EMAIL_TO: ${EMAIL_TO ? 'SET' : 'MISSING'}`);
-    console.log('--------------------------');
     console.log('Email configuration is not set. Outputting to console instead:');
     console.log(message);
     return;
@@ -72,10 +67,6 @@ async function sendEmail(message: string) {
 }
 
 async function checkGymAvailability() {
-  console.log('--- Environment Variable Keys ---');
-  console.log(Object.keys(process.env).filter(k => k.startsWith('EMAIL') || k.startsWith('SMTP') || k === 'TARGET_DATES'));
-  console.log('--------------------------------');
-
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -95,8 +86,11 @@ async function checkGymAvailability() {
         const catGym = document.querySelector('input#catSel1_1') as HTMLElement;
         if (catGym) catGym.click();
         await new Promise(r => setTimeout(r, 1000));
-        const basket = document.querySelector('input#genSel1_5') as HTMLElement;
-        if (basket) basket.click();
+        
+        // ミニバスケットボール (genSel1_6) を選択
+        const miniBasket = document.querySelector('input#genSel1_6') as HTMLElement;
+        if (miniBasket) miniBasket.click();
+        
         const targetGym = document.querySelector(`input#${gymId}`) as HTMLElement;
         if (targetGym) targetGym.click();
       }, gym.id);
@@ -141,7 +135,7 @@ async function checkGymAvailability() {
   await browser.close();
 
   if (allResults.length > 0) {
-    const message = '西宮市の体育館（バスケ・半面）に空きが見つかりました。\n\n' + allResults.join('\n\n');
+    const message = '西宮市の体育館（ミニバス・半面）に空きが見つかりました。\n\n' + allResults.join('\n\n');
     await sendEmail(message);
   } else {
     console.log('No available slots found.');
