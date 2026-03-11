@@ -78,22 +78,25 @@ async function checkGymAvailability() {
       await page.goto(BASE_URL);
       await page.click('text=ログインせずに空き状況を検索');
       
-      // 1. 大分類「体育室」を選択
-      // 2. 小分類「バスケットボール」を選択
-      // 3. 対象の「体育館」を選択
-      await page.evaluate((gymId) => {
-        (document.querySelector('input#catSel1_1') as HTMLElement)?.click(); // 体育室
-        setTimeout(() => {
-          (document.querySelector('input#genSel1_5') as HTMLElement)?.click(); // バスケットボール
-          (document.querySelector(`input#${gymId}`) as HTMLElement)?.click(); // 体育館
-        }, 500);
+      // カテゴリ選択（体育室 -> バスケットボール -> 体育館）を確実に行う
+      await page.evaluate(async (gymId) => {
+        const catGym = document.querySelector('input#catSel1_1') as HTMLElement;
+        if (catGym) catGym.click();
+        
+        // 表示更新を待つ
+        await new Promise(r => setTimeout(r, 1000));
+        
+        const basket = document.querySelector('input#genSel1_5') as HTMLElement;
+        if (basket) basket.click();
+        
+        const targetGym = document.querySelector(`input#${gymId}`) as HTMLElement;
+        if (targetGym) targetGym.click();
       }, gym.id);
       
-      // 非同期での表示切り替えを待つための待機
       await page.waitForTimeout(1000);
       await page.click('button:has-text("選択した条件で次へ")');
 
-      // 4. 「体育室半面」を選択
+      // 体育室半面を選択
       const foundHalf = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('tr'));
         const halfRow = rows.find(r => r.innerText.includes('体育室半面'));
@@ -105,19 +108,23 @@ async function checkGymAvailability() {
       if (foundHalf) {
         await page.click('button:has-text("選択した施設で検索")');
 
+        // カレンダー画面：31日間表示に切り替え
+        await page.waitForSelector('input#dispDayKbn_2');
         await page.evaluate(() => {
-          const radio31 = document.querySelector('input#dispDayKbn_2') as HTMLElement;
-          if (radio31) radio31.click();
+          (document.querySelector('input#dispDayKbn_2') as HTMLElement)?.click();
         });
         await page.click('button:has-text("選択した条件で表示")');
-        await page.waitForLoadState('networkidle');
+        
+        // 表が更新されるのを待つ
+        await page.waitForTimeout(2000);
 
         let combinedSlots = await scrapeCalendar(page);
         
+        // 「次の31日分」ボタンがあれば、さらに31日分取得
         const nextButton = page.locator('a:has-text("次の31日分"), button:has-text("次の31日分")');
         if (await nextButton.isVisible({ timeout: 3000 })) {
           await nextButton.click();
-          await page.waitForLoadState('networkidle');
+          await page.waitForTimeout(2000);
           const secondMonthSlots = await scrapeCalendar(page);
           combinedSlots = [...combinedSlots, ...secondMonthSlots];
         }
@@ -133,7 +140,7 @@ async function checkGymAvailability() {
   await browser.close();
 
   if (allResults.length > 0) {
-    const message = '西宮市の体育館（バスケットボール・半面）に空きが見つかりました。\n\n' + allResults.join('\n\n');
+    const message = '西宮市の体育館（バスケ・半面）に空きが見つかりました。\n\n' + allResults.join('\n\n');
     await sendEmail(message);
   } else {
     console.log('No available slots found.');
@@ -143,7 +150,9 @@ async function checkGymAvailability() {
 async function scrapeCalendar(page: Page): Promise<{ date: string, time: string, status: string }[]> {
   return await page.evaluate(() => {
     const results: { date: string, time: string, status: string }[] = [];
-    const table = document.querySelector('table');
+    const tables = Array.from(document.querySelectorAll('table'));
+    // 日付ヘッダーを持つテーブルを探す
+    const table = tables.find(t => t.innerText.includes('月') && t.innerText.includes('日'));
     if (!table) return results;
 
     const allThs = Array.from(table.querySelectorAll('th'));
