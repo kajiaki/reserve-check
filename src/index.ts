@@ -18,8 +18,6 @@ const EMAIL_TO = process.env.EMAIL_TO;
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT) || 465;
 
-// TARGET_DATES のパース処理
-// 形式: "2026-04-11:10-14, 2026-04-12"
 interface TargetDateConfig {
   date: string;
   startHour: number;
@@ -103,14 +101,22 @@ async function checkGymAvailability() {
         await page.click('button:has-text("選択した条件で表示")');
         await page.waitForLoadState('networkidle');
 
-        // 2ヶ月分をチェックするために全スロットを取得
-        const firstMonthSlots = await scrapeCalendar(page);
+        // 1ヶ月目（本日〜31日分）をチェック
+        let combinedSlots = await scrapeCalendar(page);
         
-        await page.click('button:has-text("次の31日分")');
-        await page.waitForLoadState('networkidle');
-        const secondMonthSlots = await scrapeCalendar(page);
+        // 「次の31日分」ボタンがあるか確認してクリック（最大5秒待機）
+        const nextButton = page.locator('button:has-text("次の31日分")');
+        try {
+          if (await nextButton.isVisible({ timeout: 5000 })) {
+            await nextButton.click();
+            await page.waitForLoadState('networkidle');
+            const secondMonthSlots = await scrapeCalendar(page);
+            combinedSlots = [...combinedSlots, ...secondMonthSlots];
+          }
+        } catch (e) {
+          console.log(`  Next month button not found or not clickable for ${gym.name}. Skipping.`);
+        }
 
-        const combinedSlots = [...firstMonthSlots, ...secondMonthSlots];
         const gymResults = processResults(gym.name, combinedSlots);
         if (gymResults) allResults.push(gymResults);
       }
@@ -122,7 +128,7 @@ async function checkGymAvailability() {
   await browser.close();
 
   if (allResults.length > 0) {
-    const message = '西宮市の体育館に空きが見つかりました。\n\n' + allResults.join('\n\n');
+    const message = '西宮市の体育館に空きが見見つかりました。\n\n' + allResults.join('\n\n');
     await sendEmail(message);
   } else {
     console.log('No available slots found.');
@@ -177,19 +183,16 @@ function processResults(gymName: string, availability: { date: string, time: str
 
     const startHour = parseInt(a.time.split(':')[0]);
 
-    // 1. 個別の日付設定がある場合
     const specificConfig = TARGET_DATE_CONFIGS.find(c => c.date === dateStr);
     if (specificConfig) {
       return startHour >= specificConfig.startHour && startHour < specificConfig.endHour;
     }
 
-    // 2. 日付設定がない場合、土日祝日のデフォルト時間(8-18)
     if (TARGET_DATE_CONFIGS.length === 0) {
       if (isSaturday(date) || isSunday(date) || !!JapaneseHolidays.isHoliday(date)) {
         return startHour >= 8 && startHour < 18;
       }
     }
-
     return false;
   });
 
