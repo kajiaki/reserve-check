@@ -72,6 +72,10 @@ async function sendEmail(message: string) {
 }
 
 async function checkGymAvailability() {
+  console.log('--- Environment Variable Keys ---');
+  console.log(Object.keys(process.env).filter(k => k.startsWith('EMAIL') || k.startsWith('SMTP') || k === 'TARGET_DATES'));
+  console.log('--------------------------------');
+
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
