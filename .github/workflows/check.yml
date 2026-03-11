@@ -2,7 +2,10 @@ name: Reserve Check
 
 on:
   schedule:
-    - cron: '0 23-13/2 * * *' # 日本時間 8:00 - 22:00 の間、2時間おき
+    # 日本時間 08:00 (UTC 23:00)
+    - cron: '0 23 * * *'
+    # 日本時間 10:00 - 22:00 の間、2時間おき (UTC 01:00 - 13:00)
+    - cron: '0 1-13/2 * * *'
   workflow_dispatch:
 
 jobs:
