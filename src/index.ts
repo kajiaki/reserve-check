@@ -78,25 +78,18 @@ async function checkGymAvailability() {
       await page.goto(BASE_URL);
       await page.click('text=ログインせずに空き状況を検索');
       
-      // モード選択（空き照会）とカテゴリ選択を確実に行う
       await page.evaluate(async (gymId) => {
-        // 1. 「施設の空き照会／予約申込」を選択
         const yoyakuMode = document.querySelector('input#yoyakuMode_1') as HTMLElement;
         if (yoyakuMode) yoyakuMode.click();
-
         await new Promise(r => setTimeout(r, 500));
 
-        // 2. 「体育室」を選択
         const catGym = document.querySelector('input#catSel1_1') as HTMLElement;
         if (catGym) catGym.click();
-        
         await new Promise(r => setTimeout(r, 1000));
         
-        // 3. 「バスケットボール」を選択
         const basket = document.querySelector('input#genSel1_5') as HTMLElement;
         if (basket) basket.click();
         
-        // 4. 「体育館」を選択
         const targetGym = document.querySelector(`input#${gymId}`) as HTMLElement;
         if (targetGym) targetGym.click();
       }, gym.id);
@@ -104,7 +97,6 @@ async function checkGymAvailability() {
       await page.waitForTimeout(1000);
       await page.click('button:has-text("選択した条件で次へ")');
 
-      // 5. 「体育室半面」を選択
       const foundHalf = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('tr'));
         const halfRow = rows.find(r => r.innerText.includes('体育室半面'));
@@ -116,17 +108,24 @@ async function checkGymAvailability() {
       if (foundHalf) {
         await page.click('button:has-text("選択した施設で検索")');
 
+        // カレンダー表示：31日間を確実に選択
         await page.waitForSelector('input#dispDayKbn_2');
         await page.evaluate(() => {
-          (document.querySelector('input#dispDayKbn_2') as HTMLElement)?.click();
+          const radio31 = document.querySelector('input#dispDayKbn_2') as HTMLElement;
+          if (radio31) radio31.click();
         });
         await page.click('button:has-text("選択した条件で表示")');
-        await page.waitForTimeout(2000);
+        
+        // カレンダーの更新を待つ（日付が増えるまで最大5秒）
+        await page.waitForFunction(() => {
+          const dateThs = Array.from(document.querySelectorAll('table th')).filter(th => th.innerText.includes('月') && th.innerText.includes('日'));
+          return dateThs.length > 7;
+        }, { timeout: 5000 }).catch(() => console.log("  Timeout waiting for 31 days display, continuing with current view."));
 
         let combinedSlots = await scrapeCalendar(page);
         
         const nextButton = page.locator('a:has-text("次の31日分"), button:has-text("次の31日分")');
-        if (await nextButton.isVisible({ timeout: 3000 })) {
+        if (await nextButton.isVisible({ timeout: 2000 })) {
           await nextButton.click();
           await page.waitForTimeout(2000);
           const secondMonthSlots = await scrapeCalendar(page);
@@ -159,18 +158,17 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
     if (!table) return results;
 
     const allThs = Array.from(table.querySelectorAll('th'));
-    const dateList: { month: number, day: number }[] = [];
-    
-    allThs.forEach(th => {
+    // 日付ヘッダー（○月○日を含むth）のみを抽出
+    const dateHeaders = allThs.filter(th => th.innerText.includes('月') && th.innerText.includes('日'));
+    const dateList = dateHeaders.map(th => {
       const text = th.innerText.replace(/\s+/g, '');
       const match = text.match(/(\d+)月(\d+)日/);
-      if (match) {
-        dateList.push({ month: parseInt(match[1]), day: parseInt(match[2]) });
-      }
+      return match ? { month: parseInt(match[1]), day: parseInt(match[2]) } : null;
     });
 
     if (dateList.length === 0) return results;
 
+    // 時間帯行を処理
     const rows = Array.from(table.querySelectorAll('tr')).filter(r => r.querySelector('th[scope="row"]'));
     
     rows.forEach(row => {
@@ -187,11 +185,13 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
         
         if (alt.includes('空いています') || src.includes('icn_scche_ok')) {
           const dateInfo = dateList[index];
-          results.push({
-            date: `${dateInfo.month}/${dateInfo.day}`,
-            time: timeRange,
-            status: td.innerText.trim() || '○'
-          });
+          if (dateInfo) {
+            results.push({
+              date: `${dateInfo.month}/${dateInfo.day}`,
+              time: timeRange,
+              status: td.innerText.trim() || '○'
+            });
+          }
         }
       });
     });
