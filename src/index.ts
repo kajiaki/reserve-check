@@ -12,15 +12,35 @@ const TARGET_GYMS = [
   { id: 'catSel3_17', name: '松原体育館' },
 ];
 
-// メール設定（環境変数から取得）
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
 const EMAIL_TO = process.env.EMAIL_TO;
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT) || 465;
 
-// 特定の日付指定（環境変数から取得。例: "2026-04-11, 2026-04-12"）
-const TARGET_DATES = process.env.TARGET_DATES ? process.env.TARGET_DATES.split(',').map(d => d.trim()) : [];
+// TARGET_DATES のパース処理
+// 形式: "2026-04-11:10-14, 2026-04-12"
+interface TargetDateConfig {
+  date: string;
+  startHour: number;
+  endHour: number;
+}
+
+const TARGET_DATE_CONFIGS: TargetDateConfig[] = (process.env.TARGET_DATES || '')
+  .split(',')
+  .map(item => item.trim())
+  .filter(item => item !== '')
+  .map(item => {
+    const [date, timeRange] = item.split(':');
+    let startHour = 8;
+    let endHour = 18;
+    if (timeRange) {
+      const [s, e] = timeRange.split('-').map(Number);
+      if (!isNaN(s)) startHour = s;
+      if (!isNaN(e)) endHour = e;
+    }
+    return { date, startHour, endHour };
+  });
 
 const BASE_URL = 'https://yoyaku-nishi.growone.net/sportsnet/Welcome.cgi';
 
@@ -30,17 +50,10 @@ async function sendEmail(message: string) {
     console.log(message);
     return;
   }
-
   const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465,
-    auth: {
-      user: EMAIL_USER,
-      pass: EMAIL_PASS,
-    },
+    host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465,
+    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
   });
-
   try {
     await transporter.sendMail({
       from: `"西宮体育館予約チェッカー" <${EMAIL_USER}>`,
@@ -66,21 +79,39 @@ async function checkGymAvailability() {
     try {
       await page.goto(BASE_URL);
       await page.click('text=ログインせずに空き状況を検索');
-      await page.check('input#catSel1_1'); // 体育室
-      await page.check(`input#${gym.id}`);
+      
+      await page.evaluate((gymId) => {
+        (document.querySelector('input#catSel1_1') as HTMLElement)?.click();
+        (document.querySelector(`input#${gymId}`) as HTMLElement)?.click();
+      }, gym.id);
       await page.click('button:has-text("選択した条件で次へ")');
 
-      const halfCourtRow = page.locator('tr', { hasText: '体育室半面' });
-      const checkbox = halfCourtRow.locator('input[type="checkbox"]');
-      if (await checkbox.count() > 0) {
-        await checkbox.first().check();
+      const foundHalf = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('tr'));
+        const halfRow = rows.find(r => r.innerText.includes('体育室半面'));
+        const cb = halfRow?.querySelector('input[type="checkbox"]') as HTMLElement;
+        if (cb) { cb.click(); return true; }
+        return false;
+      });
+
+      if (foundHalf) {
         await page.click('button:has-text("選択した施設で検索")');
 
-        await page.check('input#dispDayKbn_2'); // 31日間
+        await page.evaluate(() => {
+          (document.querySelector('input#dispDayKbn_2') as HTMLElement)?.click();
+        });
         await page.click('button:has-text("選択した条件で表示")');
         await page.waitForLoadState('networkidle');
 
-        const gymResults = await scrapeCalendar(page, gym.name);
+        // 2ヶ月分をチェックするために全スロットを取得
+        const firstMonthSlots = await scrapeCalendar(page);
+        
+        await page.click('button:has-text("次の31日分")');
+        await page.waitForLoadState('networkidle');
+        const secondMonthSlots = await scrapeCalendar(page);
+
+        const combinedSlots = [...firstMonthSlots, ...secondMonthSlots];
+        const gymResults = processResults(gym.name, combinedSlots);
         if (gymResults) allResults.push(gymResults);
       }
     } catch (error) {
@@ -98,60 +129,68 @@ async function checkGymAvailability() {
   }
 }
 
-async function scrapeCalendar(page: Page, gymName: string): Promise<string | null> {
-  const availability = await page.evaluate(() => {
+async function scrapeCalendar(page: Page): Promise<{ date: string, time: string, status: string }[]> {
+  return await page.evaluate(() => {
     const results: { date: string, time: string, status: string }[] = [];
     const table = document.querySelector('table');
     if (!table) return results;
 
-    const headers = Array.from(table.querySelectorAll('thead th, tr:first-child th')).slice(1);
+    const headers = Array.from(table.querySelectorAll('th')).filter(h => h.innerText.includes('月'));
     const dateList = headers.map(h => {
       const text = h.innerText.replace(/\s+/g, '');
       const match = text.match(/(\d+)月(\d+)日/);
       return match ? { month: parseInt(match[1]), day: parseInt(match[2]) } : null;
     });
 
-    const rows = Array.from(table.querySelectorAll('tbody tr, tr')).filter(r => r.querySelector('th[scope="row"]'));
-    
+    const rows = Array.from(table.querySelectorAll('tr')).filter(r => r.querySelector('th[scope="row"]'));
     rows.forEach(row => {
       const timeRange = (row.querySelector('th') as HTMLElement).innerText.trim();
-      const startHour = parseInt(timeRange.split(':')[0]);
-
-      if (startHour >= 8 && startHour < 18) {
-        const cells = Array.from(row.querySelectorAll('td'));
-        cells.forEach((cell, index) => {
-          const dateInfo = dateList[index];
-          if (!dateInfo) return;
-
-          const img = cell.querySelector('img');
-          const alt = img?.getAttribute('alt') || '';
-          
-          if (alt.includes('空いています')) {
-            const countText = cell.innerText.trim();
-            results.push({
-              date: `${dateInfo.month}/${dateInfo.day}`,
-              time: timeRange,
-              status: countText || '○'
-            });
-          }
-        });
-      }
+      const cells = Array.from(row.querySelectorAll('td'));
+      cells.forEach((cell, index) => {
+        const dateInfo = dateList[index];
+        if (!dateInfo) return;
+        const img = cell.querySelector('img');
+        const alt = img?.getAttribute('alt') || '';
+        if (alt.includes('空いています')) {
+          results.push({
+            date: `${dateInfo.month}/${dateInfo.day}`,
+            time: timeRange,
+            status: cell.innerText.trim() || '○'
+          });
+        }
+      });
     });
     return results;
   });
+}
 
+function processResults(gymName: string, availability: { date: string, time: string, status: string }[]): string | null {
   const year = new Date().getFullYear();
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+
   const filtered = availability.filter(a => {
     const [month, day] = a.date.split('/').map(Number);
-    const date = new Date(year, month - 1, day);
+    const targetYear = (month < currentMonth) ? year + 1 : year;
+    const date = new Date(targetYear, month - 1, day);
     const dateStr = format(date, 'yyyy-MM-dd');
 
-    // 1. 指定日付がある場合、それに一致するか
-    if (TARGET_DATES.length > 0) {
-      return TARGET_DATES.includes(dateStr);
+    const startHour = parseInt(a.time.split(':')[0]);
+
+    // 1. 個別の日付設定がある場合
+    const specificConfig = TARGET_DATE_CONFIGS.find(c => c.date === dateStr);
+    if (specificConfig) {
+      return startHour >= specificConfig.startHour && startHour < specificConfig.endHour;
     }
-    // 2. 指定がない場合は、土日祝日を対象にする
-    return isSaturday(date) || isSunday(date) || !!JapaneseHolidays.isHoliday(date);
+
+    // 2. 日付設定がない場合、土日祝日のデフォルト時間(8-18)
+    if (TARGET_DATE_CONFIGS.length === 0) {
+      if (isSaturday(date) || isSunday(date) || !!JapaneseHolidays.isHoliday(date)) {
+        return startHour >= 8 && startHour < 18;
+      }
+    }
+
+    return false;
   });
 
   if (filtered.length === 0) return null;
