@@ -78,17 +78,25 @@ async function checkGymAvailability() {
       await page.goto(BASE_URL);
       await page.click('text=ログインせずに空き状況を検索');
       
-      // カテゴリ選択（体育室 -> バスケットボール -> 体育館）を確実に行う
+      // モード選択（空き照会）とカテゴリ選択を確実に行う
       await page.evaluate(async (gymId) => {
+        // 1. 「施設の空き照会／予約申込」を選択
+        const yoyakuMode = document.querySelector('input#yoyakuMode_1') as HTMLElement;
+        if (yoyakuMode) yoyakuMode.click();
+
+        await new Promise(r => setTimeout(r, 500));
+
+        // 2. 「体育室」を選択
         const catGym = document.querySelector('input#catSel1_1') as HTMLElement;
         if (catGym) catGym.click();
         
-        // 表示更新を待つ
         await new Promise(r => setTimeout(r, 1000));
         
+        // 3. 「バスケットボール」を選択
         const basket = document.querySelector('input#genSel1_5') as HTMLElement;
         if (basket) basket.click();
         
+        // 4. 「体育館」を選択
         const targetGym = document.querySelector(`input#${gymId}`) as HTMLElement;
         if (targetGym) targetGym.click();
       }, gym.id);
@@ -96,7 +104,7 @@ async function checkGymAvailability() {
       await page.waitForTimeout(1000);
       await page.click('button:has-text("選択した条件で次へ")');
 
-      // 体育室半面を選択
+      // 5. 「体育室半面」を選択
       const foundHalf = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('tr'));
         const halfRow = rows.find(r => r.innerText.includes('体育室半面'));
@@ -108,19 +116,15 @@ async function checkGymAvailability() {
       if (foundHalf) {
         await page.click('button:has-text("選択した施設で検索")');
 
-        // カレンダー画面：31日間表示に切り替え
         await page.waitForSelector('input#dispDayKbn_2');
         await page.evaluate(() => {
           (document.querySelector('input#dispDayKbn_2') as HTMLElement)?.click();
         });
         await page.click('button:has-text("選択した条件で表示")');
-        
-        // 表が更新されるのを待つ
         await page.waitForTimeout(2000);
 
         let combinedSlots = await scrapeCalendar(page);
         
-        // 「次の31日分」ボタンがあれば、さらに31日分取得
         const nextButton = page.locator('a:has-text("次の31日分"), button:has-text("次の31日分")');
         if (await nextButton.isVisible({ timeout: 3000 })) {
           await nextButton.click();
@@ -151,7 +155,6 @@ async function scrapeCalendar(page: Page): Promise<{ date: string, time: string,
   return await page.evaluate(() => {
     const results: { date: string, time: string, status: string }[] = [];
     const tables = Array.from(document.querySelectorAll('table'));
-    // 日付ヘッダーを持つテーブルを探す
     const table = tables.find(t => t.innerText.includes('月') && t.innerText.includes('日'));
     if (!table) return results;
 
