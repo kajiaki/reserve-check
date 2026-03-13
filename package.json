@@ -8,16 +8,16 @@
     "build": "tsc"
   },
   "dependencies": {
-    "playwright": "^1.42.0",
     "axios": "^1.6.7",
-    "nodemailer": "^6.9.9",
     "date-fns": "^3.3.1",
-    "japanese-holidays": "^1.0.8"
+    "japanese-holidays": "^1.0.8",
+    "nodemailer": "^8.0.2",
+    "playwright": "^1.42.0"
   },
   "devDependencies": {
+    "@types/node": "^24",
+    "@types/nodemailer": "^6.4.14",
     "tsx": "^4.7.1",
-    "typescript": "^5.3.3",
-    "@types/node": "^20.11.24",
-    "@types/nodemailer": "^6.4.14"
+    "typescript": "^5.3.3"
   }
 }
