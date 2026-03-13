@@ -1,6 +1,7 @@
 import { chromium, Page } from 'playwright';
 import nodemailer from 'nodemailer';
 import { isSaturday, isSunday, format, addDays } from 'date-fns';
+import { ja } from 'date-fns/locale';
 import * as JapaneseHolidays from 'japanese-holidays';
 
 const TARGET_GYMS = [
@@ -295,8 +296,13 @@ function processResults(gymName: string, availability: { date: string, time: str
   if (filtered.length === 0) return null;
 
   const grouped = filtered.reduce((acc, curr) => {
-    if (!acc[curr.date]) acc[curr.date] = [];
-    acc[curr.date].push(`・${curr.time} (空き: ${curr.status})`);
+    const [month, day] = curr.date.split('/').map(Number);
+    const targetYear = (month < currentMonth - 2) ? year + 1 : year;
+    const date = new Date(targetYear, month - 1, day);
+    const dateWithDay = format(date, 'M/d(E)', { locale: ja });
+
+    if (!acc[dateWithDay]) acc[dateWithDay] = [];
+    acc[dateWithDay].push(`・${curr.time} (空き: ${curr.status})`);
     return acc;
   }, {} as Record<string, string[]>);
 
