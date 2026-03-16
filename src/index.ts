@@ -10,7 +10,7 @@ const TARGET_GYMS = [
   { id: 'catSel3_5', name: '甲武体育館' },
   { id: 'catSel3_6', name: '北夙川体育館' },
   { id: 'catSel3_10', name: '流通東体育館' },
-  { id: 'catSel3_16', name: '浜甲子園体育館' },
+  { id: 'catSel3_12', name: '浜甲子園体育館' },
   { id: 'catSel3_17', name: '松原体育館' },
 ];
 
@@ -89,17 +89,21 @@ async function checkGymAvailability() {
     await page.evaluate((gymIds) => {
       const mode1 = document.querySelector('input#yoyakuMode_1') as HTMLInputElement;
       if (mode1) mode1.click();
+
       const catGym = document.querySelector('input#catSel1_1') as HTMLInputElement;
       if (catGym) catGym.click();
+
       const miniBasket = document.querySelector('input#genSel1_6') as HTMLInputElement;
       if (miniBasket) miniBasket.click();
+
       gymIds.forEach(id => {
         const box = document.querySelector(`input#${id}`) as HTMLInputElement;
-        if (box && !box.checked) box.click();
+        if (box && !box.checked) {
+          box.click();
+        }
       });
     }, TARGET_GYMS.map(g => g.id));
 
-    await page.waitForTimeout(1000);
     await page.locator('button, input[type="button"]').filter({ hasText: '選択した条件で次へ' }).first().click();
     await page.waitForLoadState('networkidle');
 
