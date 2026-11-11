@@ -12,7 +12,7 @@
     "date-fns": "^3.3.1",
     "japanese-holidays": "^1.0.8",
     "nodemailer": "^8.0.2",
-    "playwright": "^1.42.0"
+    "playwright": "^1.61.0"
   },
   "devDependencies": {
     "@types/node": "^24",
